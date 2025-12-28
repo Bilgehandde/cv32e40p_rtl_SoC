@@ -31,9 +31,10 @@ Unlike standard ASIC designs, running a complex processor core on an FPGA requir
 
 In this project, the **CV32E40P core was adapted for the Artix-7 architecture**. The clock gating logic and system reset structure were optimized to ensure a **fully synchronous and stable operation**. As a result, the system runs error-free at 50 MHz with verified timing margins.
 
+## License & Credits
+Core: CV32E40P by OpenHW Group (Solderpad Hardware License).
+
 ## 📂 Directory Structure
-
-
 
 ```text
 RISCV_Basys3_SoC/
@@ -47,5 +48,5 @@ RISCV_Basys3_SoC/
 ├── scripts/            # Tcl scripts to recreate the project
 └── README.md           # Project Documentation
 
-License & Credits
-Core: CV32E40P by OpenHW Group (Solderpad Hardware License).
+
+
