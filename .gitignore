@@ -1,0 +1,47 @@
+# -------------------------------------------------------------------------
+# Vivado Ignore List - Clean Professional Setup
+# -------------------------------------------------------------------------
+
+# 1. Vivado Project & Cache Directories (Devasa klasörler)
+.Xil/
+.runs/
+.cache/
+.hw/
+.sim/
+.ip_user_files/
+.bsb/
+
+# 2. Vivado Generated Files (Proje Dosyaları - TCL kullandığımız için gerek yok)
+*.xpr
+*.ppr
+*.os
+
+# 3. Simulation & Reports
+*.wdb
+*.wcfg
+*.vcd
+*.saif
+*.str
+
+# 4. Implementation Outputs (Bitstream, Checkpoints)
+# (Bunlar "Build Artifact"tir, kaynak kod değildir. Repoda yer kaplamamalı.)
+*.bit
+*.bin
+*.dcp
+*.mcs
+*.prm
+
+# 5. Log and Journal Files (Çöp günlük dosyaları)
+*.log
+*.jou
+*.backup.log
+*.backup.jou
+vivado_pid*.str
+vivado_pid*.zip
+
+# 6. Other Trash
+*.tmp
+*.bak
+*~
+.DS_Store
+.vscode/
