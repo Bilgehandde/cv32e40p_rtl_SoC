@@ -33,8 +33,7 @@ In this project, the **CV32E40P core was adapted for the Artix-7 architecture**.
 
 ## 📂 Directory Structure
 
-License & Credits
-Core: CV32E40P by OpenHW Group (Solderpad Hardware License).
+
 
 ```text
 RISCV_Basys3_SoC/
@@ -47,3 +46,6 @@ RISCV_Basys3_SoC/
 │   └── ...             # Memory and other logic
 ├── scripts/            # Tcl scripts to recreate the project
 └── README.md           # Project Documentation
+
+License & Credits
+Core: CV32E40P by OpenHW Group (Solderpad Hardware License).
