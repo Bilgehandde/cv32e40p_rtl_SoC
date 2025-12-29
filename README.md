@@ -46,7 +46,9 @@ RISCV_Basys3_SoC/
 │   ├── axi_interconnect.sv # AXI Bus Logic
 │   └── ...             # Memory and other logic
 ├── scripts/            # Tcl scripts to recreate the project
+|__ tb/
 └── README.md           # Project Documentation
+
 
 
 
