@@ -4,80 +4,103 @@ module axi_instr_decoder (
     input  logic clk,
     input  logic rst_n,
 
-    // MASTER PORT (CPU Instruction Port)
+    // =======================================================================
+    // MASTER INTERFACE (Connected to CPU Instruction Port)
+    // =======================================================================
+    // Read Address Channel
     input  logic [31:0] s_araddr, 
-    input  logic s_arvalid, 
-    output logic s_arready,
+    input  logic        s_arvalid, 
+    output logic        s_arready,
+    
+    // Read Data Channel
     output logic [31:0] s_rdata,  
-    output logic s_rvalid,  
-    input  logic s_rready,
+    output logic        s_rvalid,  
+    input  logic        s_rready,
 
-    // SLAVE 0: BOOT ROM
+    // =======================================================================
+    // SLAVE 0: BOOT ROM (Hardcoded Assembly)
+    // =======================================================================
     output logic [31:0] rom_araddr, 
-    output logic rom_arvalid, 
-    input  logic rom_arready,
+    output logic        rom_arvalid, 
+    input  logic        rom_arready,
+    
     input  logic [31:0] rom_rdata,  
-    input  logic rom_rvalid,  
-    output logic rom_rready,
+    input  logic        rom_rvalid,  
+    output logic        rom_rready,
 
-    // SLAVE 1: IRAM (PORT A)
+    // =======================================================================
+    // SLAVE 1: INSTRUCTION RAM (Main Memory - Port A)
+    // =======================================================================
     output logic [31:0] iram_araddr, 
-    output logic iram_arvalid, 
-    input  logic iram_arready,
+    output logic        iram_arvalid, 
+    input  logic        iram_arready,
+    
     input  logic [31:0] iram_rdata,  
-    input  logic iram_rvalid,  
-    output logic iram_rready
+    input  logic        iram_rvalid,  
+    output logic        iram_rready
 );
 
-    // Adres Seçiciler (Basit Combinational Logic)
-    // 0x000... -> ROM
-    // 0x001... -> IRAM
-    wire sel_rom  = (s_araddr[31:20] == 12'h000);
-    wire sel_iram = (s_araddr[31:20] == 12'h001);
+    // =======================================================================
+    // 1. ADDRESS DECODING (Combinational)
+    // =======================================================================
+    // Base Address Matching:
+    // 0x000... -> Select Boot ROM
+    // 0x001... -> Select Instruction RAM
+    logic sel_rom;
+    logic sel_iram;
 
-    // -----------------------------------------------------------
-    // 1. ADRES YOLU (MASTER -> SLAVE)
-    // -----------------------------------------------------------
-    // Gelen adresi ve valid sinyalini direkt ilgili slave'e yönlendir.
-    // Latch YOK, State Machine YOK.
+    assign sel_rom  = (s_araddr[31:20] == 12'h000);
+    assign sel_iram = (s_araddr[31:20] == 12'h001);
+
+    // =======================================================================
+    // 2. READ ADDRESS CHANNEL ROUTING (Master -> Slave)
+    // =======================================================================
+    // The address and valid signals are broadcast to all slaves, 
+    // but only the selected slave receives 'valid' as High.
+    // This creates a Zero-Latency path.
     
+    // Route to ROM
     assign rom_araddr  = s_araddr;
     assign rom_arvalid = s_arvalid && sel_rom;
     
+    // Route to IRAM
     assign iram_araddr  = s_araddr;
     assign iram_arvalid = s_arvalid && sel_iram;
 
-    // Master'a "Hazýrým" cevabý:
-    // Hangi slave seçiliyse onun ready sinyalini Master'a ilet.
-    // Eðer adres boþluða denk geliyorsa (default) hemen 1 dön.
+    // Ready MUX: Route the 'ready' signal from the selected slave back to CPU.
+    // If accessing an unmapped area (hole), return '1' immediately to prevent hang.
     assign s_arready = sel_rom  ? rom_arready :
                        sel_iram ? iram_arready : 
-                       1'b1; // Default Ready
+                       1'b1; // Default Ready (swallow request)
 
-    // -----------------------------------------------------------
-    // 2. VERÝ YOLU (SLAVE -> MASTER)
-    // -----------------------------------------------------------
-    // Cevap kimden geliyorsa onu Master'a ilet.
-    // Burasý için basit bir MUX veya 'OR' mantýðý yeterli çünkü
-    // AXI protokolünde sadece biri valid olur.
+    // =======================================================================
+    // 3. READ DATA CHANNEL ROUTING (Slave -> Master)
+    // =======================================================================
+    // Since the CPU issues in-order requests, we can simply route 
+    // whichever slave asserts 'rvalid' back to the master.
     
     always_comb begin
-        s_rdata  = 32'b0;
-        s_rvalid = 1'b0;
-        
+        // Default Assignments (Idle)
+        s_rdata     = 32'b0;
+        s_rvalid    = 1'b0;
         rom_rready  = 1'b0;
         iram_rready = 1'b0;
 
-        // ROM'dan cevap geldiyse
+        // Priority Logic: Check who is responding
         if (rom_rvalid) begin
-            s_rdata    = rom_rdata;
-            s_rvalid   = 1'b1;
-            rom_rready = s_rready; // Master hazýrsa Slave'e ilet
-        end
-        // IRAM'den cevap geldiyse
-        else if (iram_rvalid) begin
-            s_rdata    = iram_rdata;
-            s_rvalid   = 1'b1;
+            // --- Response from ROM ---
+            s_rdata     = rom_rdata;
+            s_rvalid    = 1'b1;
+            
+            // Pass the CPU's ready signal back to ROM
+            rom_rready  = s_rready; 
+        
+        end else if (iram_rvalid) begin
+            // --- Response from IRAM ---
+            s_rdata     = iram_rdata;
+            s_rvalid    = 1'b1;
+            
+            // Pass the CPU's ready signal back to IRAM
             iram_rready = s_rready;
         end
     end

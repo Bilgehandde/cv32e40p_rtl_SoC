@@ -4,90 +4,112 @@ module axi_gpio (
     input  logic clk,
     input  logic rst_n,
 
-    // AXI Slave Interface
+    // =======================================================================
+    // AXI SLAVE INTERFACE
+    // =======================================================================
+    // Write Address
     input  logic [31:0] s_awaddr, 
     input  logic        s_awvalid, 
-    output logic        s_awready, // <--- EKLENDÝ (Wrapper bunu arýyor)
+    output logic        s_awready, // Always Ready
 
+    // Write Data
     input  logic [31:0] s_wdata,  
     input  logic        s_wvalid,
-    output logic        s_wready,  // <--- EKLENDÝ (Wrapper bunu arýyor)
+    output logic        s_wready,  // Always Ready
+    input  logic [3:0]  s_wstrb,   // Unused in simple GPIO (assume full word write)
 
+    // Write Response
     output logic        s_bvalid, 
     input  logic        s_bready, 
     
+    // Read Address
     input  logic [31:0] s_araddr, 
     input  logic        s_arvalid, 
-    output logic        s_arready, // <--- EKLENDÝ (Wrapper bunu arýyor)
+    output logic        s_arready, // Always Ready
     
+    // Read Data
     output logic [31:0] s_rdata,  
     output logic        s_rvalid, 
     input  logic        s_rready,
     
-    input  logic [3:0]  s_wstrb,
-    
-    // GPIO Pins
-    input  logic [15:0] gpio_in,
-    output logic [15:0] gpio_out
+    // =======================================================================
+    // EXTERNAL IO PINS
+    // =======================================================================
+    input  logic [15:0] gpio_in,  // Switches
+    output logic [15:0] gpio_out  // LEDs
 );
 
-    // Registerler
+    // Internal Register for Output (LEDs)
     logic [15:0] gpio_reg;
     assign gpio_out = gpio_reg;
 
-    // ==========================================================
-    // "ALWAYS READY" MANTIÐI (KÝLÝTLENMEYÝ ÖNLER)
-    // ==========================================================
-    // Master'a "Bekleme yapma, ben hep hazýrým" diyoruz.
+    // =======================================================================
+    // "ALWAYS READY" LOGIC
+    // =======================================================================
+    // Strategy: We are fast enough to accept any request in a single cycle.
+    // Asserting Ready constantly simplifies the handshake state machine.
     assign s_awready = 1'b1;
     assign s_wready  = 1'b1;
     assign s_arready = 1'b1;
 
-    // --- YAZMA KANALI (WRITE CHANNEL) ---
-    // Cevap sinyalini bir register'da tutuyoruz.
+    // =======================================================================
+    // WRITE CHANNEL LOGIC
+    // =======================================================================
     logic bvalid_reg;
     assign s_bvalid = bvalid_reg;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            gpio_reg <= 16'h0000;
+            gpio_reg   <= 16'h0000;
             bvalid_reg <= 1'b0;
         end else begin
-            // 1. Yazma Baþlatma: Valid sinyalleri geldi ve henüz cevap vermedik
-            // (Ready kontrolüne gerek yok çünkü zaten 1)
+            // Write Transaction Start
+            // Condition: Address Valid AND Data Valid AND We haven't responded yet
             if (s_awvalid && s_wvalid && !bvalid_reg) begin
-                // Adresin son 4 bitine bak (0x4 -> Output Register)
+                
+                // Address Decoding (Offset based)
+                // 0x4: Output Data Register
                 if (s_awaddr[3:0] == 4'h4) begin
                     gpio_reg <= s_wdata[15:0];
                 end
-                // Ýþlemciye "Ýþlem Tamam" bayraðýný kaldýr
+                
+                // Assert Response Valid (Transaction Accepted)
                 bvalid_reg <= 1'b1;
-            end
+            end 
             
-            // 2. Yazma Bitirme: Biz bayraðý kaldýrdýk VE Ýþlemci bunu gördü (Ready)
+            // Handshake Completion
+            // Condition: We asserted Valid AND Master asserted Ready
             else if (bvalid_reg && s_bready) begin
-                // Bayraðý indir, iþlem bitti.
-                bvalid_reg <= 1'b0;
+                bvalid_reg <= 1'b0; // Deassert Valid
             end
         end
     end
 
-    // --- OKUMA KANALI (READ CHANNEL) ---
+    // =======================================================================
+    // READ CHANNEL LOGIC
+    // =======================================================================
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s_rdata <= 32'b0;
+            s_rdata  <= 32'b0;
             s_rvalid <= 1'b0;
         end else begin
-            // Okuma isteði geldi (s_arvalid) ve henüz cevap vermedik (!s_rvalid)
+            // Read Transaction Start
+            // Condition: Address Valid AND We haven't responded yet
             if (s_arvalid && !s_rvalid) begin
-                s_rvalid <= 1'b1;
+                s_rvalid <= 1'b1; // Data is ready
+                
+                // Address Decoding
                 case (s_araddr[3:0])
-                    4'h0: s_rdata <= {16'b0, gpio_in};
-                    4'h4: s_rdata <= {16'b0, gpio_reg};
+                    4'h0: s_rdata <= {16'b0, gpio_in};  // Offset 0: Read Input (Switches)
+                    4'h4: s_rdata <= {16'b0, gpio_reg}; // Offset 4: Read Output (LED State)
                     default: s_rdata <= 32'b0;
                 endcase
-            end else if (s_rvalid && s_rready) begin
-                s_rvalid <= 1'b0;
+            end 
+            
+            // Handshake Completion
+            // Condition: We asserted Valid AND Master asserted Ready
+            else if (s_rvalid && s_rready) begin
+                s_rvalid <= 1'b0; // Deassert Valid
             end
         end
     end
