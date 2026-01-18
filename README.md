@@ -1,12 +1,12 @@
 # CV32E40P RTL SoC
-### RISC-V System-on-Chip for TEKNOFEST Microcontroller Design Competition 
+### RISC-V System-on-Chip 
 
 ![Language](https://img.shields.io/badge/Language-SystemVerilog-blue)
 ![Core](https://img.shields.io/badge/Core-RISC--V_CV32E40P-green)
 ![Platform](https://img.shields.io/badge/FPGA-Artix--7_Basys3-orange)
 ![Design](https://img.shields.io/badge/Method-Pure_RTL-red)
 
-This repository contains a **fully custom RISC-V System-on-Chip (SoC)** developed for the **TEKNOFEST Microcontroller Design Competition**.
+This repository contains a **fully custom RISC-V System-on-Chip (SoC)**.
 The design is based on the **CV32E40P industrial-grade RISC-V core** from the **OpenHW Group** and is implemented entirely in **pure SystemVerilog (RTL)**.
 
 Unlike conventional FPGA designs that rely on Vivado IP Integrator, Block Automation, or proprietary IPs, this project intentionally avoids pre-built IP cores to demonstrate **full architectural control**, **protocol-level understanding**, and **cycle-accurate system design**.
@@ -117,5 +117,6 @@ cv32e40p_rtl_soc/
 │   └── basys3_pins.xdc         # Physical Pinout and Clock Definitions
 │
 └── README.md                   # Project Documentation
+
 
 
