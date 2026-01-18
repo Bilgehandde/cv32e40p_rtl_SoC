@@ -1,5 +1,5 @@
 # CV32E40P RTL SoC
-### RISC-V System-on-Chip for TEKNOFEST Chip Design Competition 🚀
+### RISC-V System-on-Chip for TEKNOFEST Microcontroller Design Competition 
 
 ![Language](https://img.shields.io/badge/Language-SystemVerilog-blue)
 ![Core](https://img.shields.io/badge/Core-RISC--V_CV32E40P-green)
@@ -117,4 +117,5 @@ cv32e40p_rtl_soc/
 │   └── basys3_pins.xdc         # Physical Pinout and Clock Definitions
 │
 └── README.md                   # Project Documentation
+
 
