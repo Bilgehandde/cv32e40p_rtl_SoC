@@ -192,18 +192,6 @@ and fully analyzable.
 
 ---
 
-## 🚀 Future Work
-
-Planned enhancements include:
-
-- Interrupt controller integration (PLIC)
-- DMA-based Flash to RAM copy
-- Instruction cache for higher performance
-- Quad-SPI (x4) Flash mode support
-- Expanded peripheral set
-
----
-
 ## 📁 Project Structure
 
 cv32e40p_rtl_soc/
