@@ -1,93 +1,120 @@
 `timescale 1ns / 1ps
 
+/**
+ * Module: axi_qspi_master
+ * * Description:
+ * A high-performance Quad SPI (QSPI) Master Controller with an AXI4-Lite Slave interface.
+ * Designed for RISC-V SoC environments to interface with external NOR Flash memories.
+ *
+ * Architecture Features:
+ * 1. Synchronous Clock Divider: Generates a stable SPI clock (SCK) derived from ACLK.
+ * 2. Dual Shift-Register Path: Separate paths for outgoing (CMD/ADDR) and incoming (DATA) streams.
+ * 3. Edge-Aligned Logic: Drives data on SCK falling edges and samples on rising edges (SPI Mode 0).
+ * 4. RISC-V Byte Alignment: Automatically performs Byte-Swap to convert Flash Big-Endian 
+ * stream into Little-Endian words for the processor.
+ * 5. AXI4-Lite Compliant: Standard handshake for register-based control and data access.
+ */
 module axi_qspi_master (
-    input  logic        aclk,
-    input  logic        aresetn,
+    // --- Global Signals ---
+    input  logic        aclk,       // System Clock (e.g., 50MHz)
+    input  logic        aresetn,    // Active-low asynchronous reset
 
-    // =======================================================================
-    // AXI4-LITE SLAVE INTERFACE
-    // =======================================================================
-    // Write Address
-    input  logic [31:0] s_axi_awaddr,
-    input  logic        s_axi_awvalid,
-    output logic        s_axi_awready, // Always Ready
+    // --- AXI4-Lite Slave Interface ---
+    // Write Address Channel
+    input  logic [31:0] s_axi_awaddr, 
+    input  logic        s_axi_awvalid, 
+    output logic        s_axi_awready, 
 
-    // Write Data
-    input  logic [31:0] s_axi_wdata,
-    input  logic [3:0]  s_axi_wstrb,
-    input  logic        s_axi_wvalid,
-    output logic        s_axi_wready,  // Always Ready
+    // Write Data Channel
+    input  logic [31:0] s_axi_wdata,  
+    input  logic [3:0]  s_axi_wstrb, 
+    input  logic        s_axi_wvalid, 
+    output logic        s_axi_wready,
 
-    // Write Response
-    output logic [1:0]  s_axi_bresp,   // Always OKAY (00)
-    output logic        s_axi_bvalid,
+    // Write Response Channel
+    output logic [1:0]  s_axi_bresp,  
+    output logic        s_axi_bvalid, 
     input  logic        s_axi_bready,
 
-    // Read Address
-    input  logic [31:0] s_axi_araddr,
-    input  logic        s_axi_arvalid,
-    output logic        s_axi_arready, // Always Ready
+    // Read Address Channel
+    input  logic [31:0] s_axi_araddr, 
+    input  logic        s_axi_arvalid, 
+    output logic        s_axi_arready,
 
-    // Read Data
-    output logic [31:0] s_axi_rdata,
-    output logic [1:0]  s_axi_rresp,   // Always OKAY (00)
-    output logic        s_axi_rvalid,
+    // Read Data Channel
+    output logic [31:0] s_axi_rdata,  
+    output logic [1:0]  s_axi_rresp, 
+    output logic        s_axi_rvalid, 
     input  logic        s_axi_rready,
 
-    // =======================================================================
-    // PHYSICAL QSPI PINS (To External Flash)
-    // =======================================================================
-    output logic        qspi_sck,  // Serial Clock
-    output logic        qspi_cs_n, // Chip Select (Active Low)
-    inout  wire  [3:0]  qspi_dq    // Data Lines (DQ0=MOSI, DQ1=MISO)
+    // --- Physical QSPI Interface ---
+    output logic        qspi_sck,    // SPI Serial Clock
+    output logic        qspi_cs_n,   // Chip Select (Active Low)
+    inout  wire  [3:0]  qspi_dq      // Quad I/O Data Lines
 );
 
     // =======================================================================
-    // INTERNAL REGISTERS
+    // INTERNAL REGISTERS & SIGNALS
     // =======================================================================
-    logic [31:0] reg_ctrl;   // Control Register (Write 0x3 to Start)
-    logic [31:0] reg_addr;   // Flash Address to read from
-    logic [31:0] reg_data;   // Data read from Flash
-    logic        start_pulse; // Trigger signal
-    logic        busy_reg;    // Status Flag (1=Busy, 0=Ready)
+    logic [31:0] reg_addr;          // Target Flash Address
+    logic [31:0] reg_data;          // Received Data Word
+    logic        busy_reg;          // Internal status flag
+    logic        start_pulse;       // Internal trigger signal
+    logic [5:0]  bit_cnt;           // Global bit counter (64 to 0)
+    
+    // Shift Registers
+    logic [31:0] shift_reg_out;     // Serializes CMD and ADDR
+    logic [31:0] shift_reg_in;      // Accumulates incoming data bits
 
-    // SPI Engine Signals
-    logic        spi_clk_reg, spi_clk_prev;
-    logic [7:0]  shift_cmd;
-    logic [23:0] shift_addr;
-    logic [31:0] bit_cnt;
-    logic [3:0]  dq_out, dq_oe;
+    // =======================================================================
+    // SPI CLOCK GENERATION (Clock Divider)
+    // =======================================================================
+    // Physical SCK = ACLK / 4. Ensures robust timing on FPGA fabric.
+    logic [1:0] clk_div;
+    logic sck_int;
+    
+    always_ff @(posedge aclk or negedge aresetn) begin
+        if (!aresetn) clk_div <= 2'b00;
+        else if (busy_reg) clk_div <= clk_div + 1;
+        else clk_div <= 2'b00;
+    end
+    
+    // SCK gating: Active only during transaction
+    assign sck_int = clk_div[1];
+    assign qspi_sck = (busy_reg && !qspi_cs_n) ? sck_int : 1'b0;
 
-    // FSM States
-    typedef enum logic [2:0] {IDLE, CMD, ADDR, DATA, DONE} state_t;
+    // Edge Detection Pulses
+    wire sck_rise = (clk_div == 2'b01); // Logical sample point
+    wire sck_fall = (clk_div == 2'b11); // Logical drive point
+
+    // =======================================================================
+    // FINITE STATE MACHINE (FSM) DEFINITION
+    // =======================================================================
+    typedef enum logic [1:0] {IDLE, TRANSFER, DONE} state_t;
     state_t state;
 
     // =======================================================================
-    // AXI WRITE LOGIC
+    // AXI4-LITE READ/WRITE LOGIC
     // =======================================================================
-    assign s_axi_awready = 1'b1; 
-    assign s_axi_wready  = 1'b1; 
-    assign s_axi_bresp   = 2'b00; // OKAY
+    assign s_axi_awready = !busy_reg;
+    assign s_axi_wready  = !busy_reg;
+    assign s_axi_arready = !busy_reg;
+    assign s_axi_bresp   = 2'b00; // Always OKAY
+    assign s_axi_rresp   = 2'b00; // Always OKAY
 
+    // AXI Register Write Process
     always_ff @(posedge aclk or negedge aresetn) begin
-        if (!aresetn) begin 
-            s_axi_bvalid <= 0; 
-            reg_ctrl     <= 0; 
-            reg_addr     <= 0; 
-            start_pulse  <= 0; 
+        if (!aresetn) begin
+            s_axi_bvalid <= 1'b0;
+            reg_addr     <= 32'h0;
+            start_pulse  <= 1'b0;
         end else begin
-            start_pulse <= 0; // Auto-clear pulse
-            
-            if (s_axi_awvalid && s_axi_wvalid && !s_axi_bvalid) begin
-                // Address Decoding
-                if (s_axi_awaddr[7:0] == 8'h00) begin 
-                    reg_ctrl    <= s_axi_wdata; 
-                    start_pulse <= 1'b1; // Trigger SPI Transaction
-                end
-                else if (s_axi_awaddr[7:0] == 8'h04) begin
-                    reg_addr    <= s_axi_wdata;
-                end
-                
+            start_pulse <= 1'b0;
+            if (s_axi_awvalid && s_axi_wvalid && !busy_reg) begin
+                // 0x00: Trigger Control Register
+                if (s_axi_awaddr[7:0] == 8'h00) start_pulse <= 1'b1;
+                // 0x04: Address Register
+                else if (s_axi_awaddr[7:0] == 8'h04) reg_addr <= s_axi_wdata;
                 s_axi_bvalid <= 1'b1;
             end else if (s_axi_bready) begin
                 s_axi_bvalid <= 1'b0;
@@ -95,28 +122,18 @@ module axi_qspi_master (
         end
     end
 
-    // =======================================================================
-    // AXI READ LOGIC
-    // =======================================================================
-    assign s_axi_arready = 1'b1; 
-    assign s_axi_rresp   = 2'b00; // OKAY
-
+    // AXI Register Read Process
     always_ff @(posedge aclk or negedge aresetn) begin
-        if (!aresetn) begin 
-            s_axi_rvalid <= 0; 
-            s_axi_rdata  <= 0; 
+        if (!aresetn) begin
+            s_axi_rvalid <= 1'b0;
+            s_axi_rdata  <= 32'h0;
         end else begin
             if (s_axi_arvalid && !s_axi_rvalid) begin
                 s_axi_rvalid <= 1'b1;
-                
-                // Read Register Map
-                case (s_axi_araddr[7:0])
-                    8'h00: s_axi_rdata <= reg_ctrl;
-                    8'h04: s_axi_rdata <= reg_addr;
-                    8'h08: s_axi_rdata <= reg_data; // Result Data
-                    // Critical for Bootloader polling:
-                    8'h28: s_axi_rdata <= {31'b0, busy_reg}; 
-                    default: s_axi_rdata <= 0;
+                case(s_axi_araddr[7:0])
+                    8'h08: s_axi_rdata <= reg_data;         // Flash Data Output
+                    8'h28: s_axi_rdata <= {31'b0, busy_reg}; // Status Register
+                    default: s_axi_rdata <= 32'h0;
                 endcase
             end else if (s_axi_rready) begin
                 s_axi_rvalid <= 1'b0;
@@ -125,141 +142,75 @@ module axi_qspi_master (
     end
 
     // =======================================================================
-    // SPI CLOCK GENERATION
+    // QSPI BIT-LEVEL ENGINE
     // =======================================================================
-    // Generates a clock at half the system frequency (50MHz / 2 = 25MHz)
-    always_ff @(posedge aclk or negedge aresetn) begin
-        if (!aresetn) begin 
-            spi_clk_reg  <= 0; 
-            spi_clk_prev <= 0; 
-        end else begin 
-            spi_clk_reg  <= ~spi_clk_reg; 
-            spi_clk_prev <= spi_clk_reg; 
-        end
-    end
+    // Currently supports Standard SPI Mode (DQ0: Output, DQ1: Input)
+    assign qspi_dq[0] = (!qspi_cs_n && bit_cnt > 31) ? shift_reg_out[31] : 1'bz;
+    assign qspi_dq[1] = 1'bz; // Input path (MISO)
+    assign qspi_dq[2] = 1'bz; // High-Z for Standard SPI
+    assign qspi_dq[3] = 1'bz; // High-Z for Standard SPI
 
-    // Only output clock during active transaction
-    assign qspi_sck = (state == IDLE || state == DONE) ? 1'b0 : spi_clk_reg;
-    
-    // Edge Detectors
-    wire sck_fall = (spi_clk_prev == 1 && spi_clk_reg == 0); // Setup Data
-    wire sck_rise = (spi_clk_prev == 0 && spi_clk_reg == 1); // Sample Data
-
-    // =======================================================================
-    // IO BUFFERS (Tri-State Control)
-    // =======================================================================
-    // Standard SPI Mode:
-    // DQ0 = MOSI (Output from FPGA)
-    // DQ1 = MISO (Input to FPGA)
-    assign qspi_dq[0] = dq_oe[0] ? dq_out[0] : 1'bz; 
-    assign qspi_dq[1] = 1'bz; // Always Input (MISO)
-    assign qspi_dq[2] = 1'bz; // WP_n (High-Z / Pull-up on board)
-    assign qspi_dq[3] = 1'bz; // HOLD_n (High-Z / Pull-up on board)
-
-    // =======================================================================
-    // SPI MASTER FSM
-    // =======================================================================
     always_ff @(posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
-            state    <= IDLE; 
-            qspi_cs_n <= 1; 
-            dq_oe    <= 0;
-            reg_data <= 0; 
-            bit_cnt  <= 0; 
-            dq_out   <= 0;
-            busy_reg <= 0;
+            state        <= IDLE;
+            qspi_cs_n    <= 1'b1;
+            busy_reg     <= 1'b0;
+            bit_cnt      <= 6'd0;
+            reg_data     <= 32'h0;
+            shift_reg_in <= 32'h0;
         end else begin
-            
-            // Set Busy Flag on Start Pulse
-            if (start_pulse) busy_reg <= 1'b1;
-
             case (state)
-                // -----------------------------------------------------------
-                // 1. IDLE: Wait for Trigger
-                // -----------------------------------------------------------
+                // --- Wait for AXI Trigger ---
                 IDLE: begin
-                    qspi_cs_n <= 1; 
-                    dq_oe     <= 0;
                     if (start_pulse) begin
-                        reg_data   <= 0; 
-                        shift_cmd  <= 8'h03; // Command: READ DATA
-                        shift_addr <= reg_addr[23:0]; // 24-bit Address
-                        bit_cnt    <= 7; 
-                        qspi_cs_n  <= 0; // Assert CS
-                        state      <= CMD;
-                        
-                        // Setup first bit of command
-                        dq_oe      <= 4'b0001; // Enable DQ0 Output
-                        dq_out[0]  <= 1'b0;    // Standard SPI Mode starts low
+                        busy_reg      <= 1'b1;
+                        qspi_cs_n     <= 1'b0;
+                        bit_cnt       <= 6'd63; // Total transaction: 8(CMD) + 24(ADDR) + 32(DATA)
+                        shift_reg_out <= {8'h03, reg_addr[23:0]}; // Command 0x03 followed by Address
+                        state         <= TRANSFER;
                     end
                 end
 
-                // -----------------------------------------------------------
-                // 2. CMD: Send 0x03 (8 bits)
-                // -----------------------------------------------------------
-                CMD: if (sck_fall) begin
-                    if (bit_cnt == 0) begin 
-                        bit_cnt   <= 23; 
-                        state     <= ADDR; 
-                        dq_out[0] <= shift_addr[23]; // Setup first address bit
-                    end else begin 
-                        bit_cnt   <= bit_cnt - 1; 
-                        dq_out[0] <= shift_cmd[bit_cnt-1]; 
-                    end
-                end
-
-                // -----------------------------------------------------------
-                // 3. ADDR: Send 24-bit Address
-                // -----------------------------------------------------------
-                ADDR: if (sck_fall) begin
-                    if (bit_cnt == 0) begin 
-                        bit_cnt <= 31; 
-                        dq_oe   <= 0; // Switch to Input Mode for DATA phase
-                        state   <= DATA; 
-                    end else begin 
-                        bit_cnt   <= bit_cnt - 1; 
-                        dq_out[0] <= shift_addr[bit_cnt-1]; 
-                    end
-                end
-
-                // -----------------------------------------------------------
-                // 4. DATA: Receive 32 bits (1 Word)
-                // -----------------------------------------------------------
-                DATA: begin
-                    // Sample MISO (DQ1) on Rising Edge
-                    if (sck_rise) begin
-                        // Debug print for simulation
-                        // $display("[QSPI] Sampling Bit %0d: %b", bit_cnt, qspi_dq[1]);
-                        reg_data[bit_cnt] <= qspi_dq[1];
-                    end
-                    
-                    // Decrement Counter on Falling Edge
+                // --- Execute Serial Transfer ---
+                TRANSFER: begin
+                    // FALLING EDGE: Setup data on the line (Drive)
                     if (sck_fall) begin
-                        if (bit_cnt == 0) begin
-                            state <= DONE;
-                        end else begin
-                            bit_cnt <= bit_cnt - 1;
+                        // Shift out Command and Address bits
+                        if (bit_cnt > 32) shift_reg_out <= {shift_reg_out[30:0], 1'b0};
+                    end
+                    
+                    // RISING EDGE: Sample data from the line (Capture)
+                    if (sck_rise) begin
+                        // Accumulate data bits during the last 32 cycles
+                        if (bit_cnt <= 31) begin
+                            shift_reg_in <= {shift_reg_in[30:0], qspi_dq[1]};
                         end
+                        
+                        // Check for completion
+                        if (bit_cnt == 0) state <= DONE;
+                        else bit_cnt <= bit_cnt - 1'b1;
                     end
                 end
 
-                // -----------------------------------------------------------
-                // 5. DONE: Endianness Swap & Cleanup
-                // -----------------------------------------------------------
+                // --- Clean up and Endian Correction ---
                 DONE: begin
-                    qspi_cs_n <= 1; // Deassert CS
+                    qspi_cs_n <= 1'b1;
+                    busy_reg  <= 1'b0;
+                    state     <= IDLE;
                     
-                    // **CRITICAL ENDIANNESS FIX**
-                    // Flash sends MSB first (Big Endian).
-                    // RISC-V expects LSB at lowest address (Little Endian).
-                    // We swap bytes here so the CPU reads valid instructions.
-                    reg_data <= {reg_data[7:0], reg_data[15:8], reg_data[23:16], reg_data[31:24]};
-                    
-                    // Clear Busy Flag (Allow CPU to proceed)
-                    busy_reg <= 1'b0; 
-                    state    <= IDLE;
+                    /**
+                     * BYTE SWAP EXPLANATION:
+                     * External SPI Flash transmits bytes in chronological order (Byte 0, 1, 2, 3).
+                     * RISC-V (Little-Endian) requires the first received byte to be in the LSB [7:0] position.
+                     * Input stream: [B0_MSB...B0_LSB]...[B3_MSB...B3_LSB]
+                     * Conversion: 0x(B0)(B1)(B2)(B3) -> 0x(B3)(B2)(B1)(B0)
+                     */
+                    reg_data <= {shift_reg_in[7:0], shift_reg_in[15:8], shift_reg_in[23:16], shift_reg_in[31:24]};
                 end
+                
+                default: state <= IDLE;
             endcase
         end
     end
+
 endmodule

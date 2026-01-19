@@ -1,139 +1,72 @@
 `timescale 1ns / 1ps
 
+/**
+ * Module: dual_port_ram_axi
+ * Description:
+ * A high-bandwidth True Dual-Port Memory Controller with AXI4-Lite interfaces.
+ * Optimized for simultaneous Instruction Fetch (Port A) and Data Access (Port B).
+ *
+ * Design Logic:
+ * Uses a pipelined architecture where the memory core operates on clock edges 
+ * while the AXI control registers handle synchronization and handshaking.
+ */
 module dual_port_ram_axi #(
     parameter MEM_SIZE_BYTES = 8192
 )(
-    input logic clk,
-    input logic rst_n,
+    input  logic         clk,
+    input  logic         rst_n,
 
-    // =======================================================================
-    // PORT A: INSTRUCTION FETCH INTERFACE (Read Only)
-    // =======================================================================
-    // Read Address Channel
-    input  logic [31:0] a_araddr, 
-    input  logic        a_arvalid, 
-    output logic        a_arready,
-    
-    // Read Data Channel
-    output logic [31:0] a_rdata,  
-    output logic        a_rvalid,  
-    input  logic        a_rready,
+    // --- PORT A: Instruction Fetch Interface ---
+    input  logic [31:0] a_araddr, input a_arvalid, output logic a_arready,
+    output logic [31:0] a_rdata,  output logic a_rvalid, input a_rready,
 
-    // =======================================================================
-    // PORT B: DATA ACCESS INTERFACE (Read / Write)
-    // =======================================================================
-    // Write Address Channel
-    input  logic [31:0] b_awaddr, 
-    input  logic        b_awvalid, 
-    output logic        b_awready,
-    
-    // Write Data Channel
-    input  logic [31:0] b_wdata,  
-    input  logic [3:0]  b_wstrb,  
-    input  logic        b_wvalid, 
-    output logic        b_wready,
-    
-    // Write Response Channel
-    output logic        b_bvalid, 
-    input  logic        b_bready,
-    
-    // Read Address Channel
-    input  logic [31:0] b_araddr, 
-    input  logic        b_arvalid, 
-    output logic        b_arready,
-    
-    // Read Data Channel
-    output logic [31:0] b_rdata,  
-    output logic        b_rvalid,  
-    input  logic        b_rready
+    // --- PORT B: Data/Load-Store Interface ---
+    input  logic [31:0] b_awaddr, input b_awvalid, output logic b_awready,
+    input  logic [31:0] b_wdata,  input [3:0] b_wstrb, input b_wvalid, output logic b_wready,
+    output logic        b_bvalid, input b_bready,
+    input  logic [31:0] b_araddr, input b_arvalid, output logic b_arready,
+    output logic [31:0] b_rdata,  output logic b_rvalid, input b_rready
 );
 
-    // =======================================================================
-    // MEMORY ARRAY DEFINITION
-    // =======================================================================
-    // Calculate depth based on 32-bit word width
     localparam DEPTH = MEM_SIZE_BYTES / 4;
-    
-    // The memory array itself (inferred as BRAM by Vivado)
-    logic [31:0] mem [0:DEPTH-1];
+
+    // Dual-Port Storage Core
+    (* ram_style = "block" *) logic [31:0] mem [0:DEPTH-1];
+
+    logic [31:0] a_rdata_internal, b_rdata_internal;
 
     // =======================================================================
-    // PORT A LOGIC: INSTRUCTION FETCH (READ ONLY)
+    // 1. DUAL-PORT SYNCHRONOUS PIPELINE
     // =======================================================================
-    
-    // Always Ready: Block RAM can accept a read address every cycle
-    assign a_arready = 1'b1; 
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            a_rvalid <= 1'b0;
-            a_rdata  <= 32'b0; // Clear output to avoid X propagation
-        end else begin
-            // Handshake: If Master puts Valid Address and we are Ready
-            if (a_arvalid && a_arready) begin
-                // Read from memory
-                // [14:2] extracts the Word Index from the Byte Address
-                // (Assuming 32KB max address space for safety, though module is 8KB)
-                a_rdata  <= mem[a_araddr[14:2]]; 
-                a_rvalid <= 1'b1;
-            end 
-            // If Master accepted the data, deassert valid
-            else if (a_rready) begin
-                a_rvalid <= 1'b0;
-            end
+    always_ff @(posedge clk) begin
+        // Parallel Read Operations
+        if (a_arvalid && a_arready) a_rdata_internal <= mem[a_araddr[12:2]];
+        if (b_arvalid && b_arready) b_rdata_internal <= mem[b_araddr[12:2]];
+        
+        // Port B Write Logic
+        if (b_awvalid && b_wvalid && b_awready && b_wready) begin
+            if (b_wstrb[0]) mem[b_awaddr[12:2]][7:0]   <= b_wdata[7:0];
+            if (b_wstrb[1]) mem[b_awaddr[12:2]][15:8]  <= b_wdata[15:8];
+            if (b_wstrb[2]) mem[b_awaddr[12:2]][23:16] <= b_wdata[23:16];
+            if (b_wstrb[3]) mem[b_awaddr[12:2]][31:24] <= b_wdata[31:24];
         end
     end
 
     // =======================================================================
-    // PORT B LOGIC: DATA ACCESS (READ & WRITE)
+    // 2. AXI STATE MACHINE & HANDSHAKING
     // =======================================================================
-
-    // --- Write Channel ---
-    assign b_awready = 1'b1; // Always ready for address
-    assign b_wready  = 1'b1; // Always ready for data
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            b_bvalid <= 1'b0;
-        end else begin
-            // Write occurs when both Address and Data are Valid and Ready
-            if (b_awvalid && b_wvalid && b_awready && b_wready) begin
-                
-                // Byte-Select Write Logic (WSTRB)
-                // Allows writing individual bytes without affecting the rest of the word
-                if (b_wstrb[0]) mem[b_awaddr[14:2]][7:0]   <= b_wdata[7:0];
-                if (b_wstrb[1]) mem[b_awaddr[14:2]][15:8]  <= b_wdata[15:8];
-                if (b_wstrb[2]) mem[b_awaddr[14:2]][23:16] <= b_wdata[23:16];
-                if (b_wstrb[3]) mem[b_awaddr[14:2]][31:24] <= b_wdata[31:24];
-                
-                // Assert Write Response Valid
-                b_bvalid <= 1'b1;
-            end 
-            // Handshake complete
-            else if (b_bready) begin
-                b_bvalid <= 1'b0;
-            end
-        end
-    end
-
-    // --- Read Channel ---
-    assign b_arready = 1'b1; // Always ready for address
+    logic a_rvalid_reg, b_bvalid_reg, b_rvalid_reg;
+    assign {a_rdata, b_rdata} = {a_rdata_internal, b_rdata_internal};
+    assign {a_rvalid, b_bvalid, b_rvalid} = {a_rvalid_reg, b_bvalid_reg, b_rvalid_reg};
+    assign {a_arready, b_awready, b_wready, b_arready} = {~a_rvalid_reg, ~b_bvalid_reg, ~b_bvalid_reg, ~b_rvalid_reg};
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            b_rvalid <= 1'b0;
-            b_rdata  <= 32'b0;
+            a_rvalid_reg <= 1'b0; b_bvalid_reg <= 1'b0; b_rvalid_reg <= 1'b0;
         end else begin
-            // Read Handshake
-            if (b_arvalid && b_arready) begin
-                b_rdata  <= mem[b_araddr[14:2]];
-                b_rvalid <= 1'b1;
-            end 
-            // Handshake complete
-            else if (b_rready) begin
-                b_rvalid <= 1'b0;
-            end
+            if (a_arvalid && a_arready) a_rvalid_reg <= 1'b1; else if (a_rready) a_rvalid_reg <= 1'b0;
+            if (b_awvalid && b_wvalid && b_awready && b_wready) b_bvalid_reg <= 1'b1; else if (b_bready) b_bvalid_reg <= 1'b0;
+            if (b_arvalid && b_arready) b_rvalid_reg <= 1'b1; else if (b_rready) b_rvalid_reg <= 1'b0;
         end
     end
-
 endmodule

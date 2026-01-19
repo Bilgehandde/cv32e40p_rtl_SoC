@@ -11,7 +11,6 @@ module soc_top (
     input  logic uart1_rx, output logic uart1_tx,
 
     // QSPI Flash Interface
-    output logic qspi_sck,  // Serial Clock
     output logic qspi_cs_n, // Chip Select (Active Low)
     inout  wire  [3:0] qspi_dq // Data Lines (Quad I/O)
 );
@@ -217,7 +216,7 @@ module soc_top (
         .uart1_rx(uart1_rx), .uart1_tx(uart1_tx),
         
         // QSPI Flash Signals
-        .qspi_sck(qspi_sck),
+        .qspi_sck(qspi_sck_internal),
         .qspi_cs_n(qspi_cs_n),
         .qspi_dq(qspi_dq)
     );
@@ -254,6 +253,28 @@ module soc_top (
         .awaddr(m1_awaddr), .awvalid(m1_awvalid), .awready(m1_awready),
         .wdata(m1_wdata),   .wvalid(m1_wvalid),   .wready(m1_wready),
         .bvalid(m1_bvalid), .bready(m1_bready)
+    );
+    
+    logic qspi_sck_internal;
+
+    STARTUPE2 #(
+        .PROG_USR("FALSE"),
+        .SIM_CCLK_FREQ(0.0)
+    )
+    STARTUPE2_inst (
+        .CFGCLK(),
+        .CFGMCLK(),
+        .EOS(),
+        .PREQ(),
+        .CLK(0),
+        .GSR(0),
+        .GTS(0),
+        .KEYCLEARB(0),
+        .PACK(0),
+        .USRCCLKO(qspi_sck_internal), 
+        .USRCCLKTS(1'b0),             
+        .USRDONEO(1),
+        .USRDONETS(1)
     );
 
 endmodule
