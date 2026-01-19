@@ -13,7 +13,7 @@ module cv32e40p_pmp #(
     input  logic        data_we_i,
     output logic        data_access_o
 );
-    // DEBUG MODE: her þeye izin ver
+    
     assign instr_access_o = 1'b1;
     assign data_access_o  = 1'b1;
 endmodule

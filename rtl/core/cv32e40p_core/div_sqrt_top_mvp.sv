@@ -9,7 +9,7 @@ module div_sqrt_top_mvp (
     input  logic [31:0] operand_b_i,
     output logic [31:0] result_o
 );
-    // DIV hiç kullanýlmýyorsa:
+   
     assign div_ready_o = 1'b1;
     assign result_o    = 32'b0;
 endmodule

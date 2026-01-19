@@ -4,6 +4,6 @@ module cluster_clock_gating (
     input  logic test_en_i,
     output logic clk_o
 );
-    // DEBUG MODE: Clock gating kapalý
+
     assign clk_o = clk_i;
 endmodule
