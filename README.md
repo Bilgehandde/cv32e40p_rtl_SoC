@@ -194,29 +194,33 @@ and fully analyzable.
 
 ## 📁 Project Structure
 
+```text
 cv32e40p_rtl_soc/
-├── rtl/
-│   ├── soc_top.sv
-│   ├── core/
-│   │   ├── cv32e40p_top.sv
-│   │   └── obi_to_axi.sv
-│   ├── interconnect/
-│   │   ├── axi_instr_decoder.sv
-│   │   ├── axi_data_decoder.sv
-│   │   └── periph_wrapper.sv
-│   ├── memory/
-│   │   ├── boot_rom.sv
-│   │   ├── dual_port_ram_axi.sv
-│   │   └── simple_ram.sv
-│   └── peripherals/
-│       ├── axi_gpio.sv
-│       ├── axi_timer.sv
-│       ├── axi_uart.sv
-│       └── axi_qspi_master.sv
-├── sim/
-│   ├── tb_soc.sv
-│   ├── axi_checker.sv
-│   └── spiflash_model.sv
-├── constr/
-│   └── basys3_pins.xdc
-└── README.md
+├── rtl/                        # Synthesizable SystemVerilog Source Code
+│   ├── soc_top.sv              # Top-Level System Module (with STARTUPE2)
+│   ├── core/                   # Processor Core Files
+│   │   ├── cv32e40p_top.sv     # OpenHW Group Core Wrapper
+│   │   └── obi_to_axi.sv       # OBI to AXI4-Lite Protocol Bridge
+│   ├── interconnect/           # Bus Logic & Decoders
+│   │   ├── axi_instr_decoder.sv # Zero-Latency Instruction Decoder
+│   │   ├── axi_data_decoder.sv  # FSM-Based Data Decoder
+│   │   └── periph_wrapper.sv    # Peripheral Sub-Interconnect
+│   ├── memory/                 # Memory Modules
+│   │   ├── boot_rom.sv         # Hardcoded Bootloader (Assembly)
+│   │   ├── dual_port_ram_axi.sv # Instruction RAM (Dual Port)
+│   │   └── simple_ram.sv       # Data RAM
+│   └── peripherals/            # I/O Controllers
+│       ├── axi_gpio.sv         # LED & Switch Controller
+│       ├── axi_timer.sv        # System Timer
+│       ├── axi_uart.sv         # UART Serial Controller
+│       └── axi_qspi_master.sv  # Custom QSPI Flash Controller (Bit-Banging)
+│
+├── sim/                        # Simulation Files
+│   ├── tb_soc.sv               # Top Level Testbench
+│   ├── axi_checker.sv          # Verification IP (Protocol Error Checker)
+│   └── spiflash_model.sv       # Flash Behavioral Simulation Model
+│
+├── constr/                     # FPGA Constraints
+│   └── basys3_pins.xdc         # Physical Pinout and Clock Definitions
+│
+└── README.md                   # Project Documentation
