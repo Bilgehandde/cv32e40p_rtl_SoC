@@ -167,6 +167,11 @@ bare-metal boot sequence:
 
 ---
 
+### 🔍 Hardware-Software Co-Verification
+To ensure system reliability before silicon implementation:
+- **Flash Memory Offsetting:** The application firmware is intentionally placed at a `0x0030_0000` offset within the QSPI Flash to prevent collisions with the FPGA bitstream.
+- **Simulation Environment:** A cycle-accurate behavioral SPI Flash model (`spiflash_model.sv`) is used in the testbench. This model mimics the timing characteristics of the physical Macronix chip, allowing the FSBL to be fully debugged in simulation before being programmed onto the Basys 3 hardware.
+
 ## 🧪 Simulation Notes
 
 A cycle-aware SPI Flash behavioral model is used during simulation to
